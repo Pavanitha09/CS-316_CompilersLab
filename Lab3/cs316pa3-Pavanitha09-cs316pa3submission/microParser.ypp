@@ -1,0 +1,337 @@
+%{
+#include<stdio.h>
+#include<stdlib.h>
+#include<bits/stdc++.h>
+#include <cstdio>
+#include<iostream>
+#include <string.h> 
+#include <utility>
+
+using namespace std;
+#include<vector>
+
+
+int yylex();
+
+
+struct diff_types{
+	char const* ID;
+	const char* value;
+	const char* type;
+	int line_no;
+};
+
+
+struct Sym_table{
+	//int total_strings;
+	//int total_variables;
+	
+	
+	//First is type, second is ID, third is value
+	vector<diff_types> attributes;
+};
+
+int func_scope = -1;
+int total_blocks = 0;
+vector <const char*> scopes;
+int decl_var = 0;
+char* type_var;
+
+vector <Sym_table> table;
+
+
+void yyerror(const char* msg);
+
+%}
+// Capital letters are all terminals
+%token PROGRAM
+%token _BEGIN
+%token END
+%token IDENTIFIER
+%token STRING
+%token STRINGLITERAL
+%token FLOAT
+%token INT
+%token VOID
+%token FUNCTION
+%token READ
+%token WRITE
+%token RETURN
+%token INTLITERAL
+%token FLOATLITERAL
+%token IF
+%token ENDIF
+%token ELSE
+%token WHILE
+%token ENDWHILE
+%token CONTINUE
+%token BREAK
+
+
+%type <s> id str
+%type <v> var_type
+
+%union{
+std::pair<std::string,int> * s;
+char * v;
+}
+
+%%
+
+program: PROGRAM id _BEGIN {
+		func_scope++;
+		scopes.push_back("GLOBAL");
+		struct Sym_table temp_table;
+		table.push_back(temp_table);
+}
+pgm_body END
+{
+	int i;
+	for(i=0; i<=func_scope;i++){
+		if(i>=1)
+		{
+			cout<<endl;			
+		}
+		
+		cout<<"Symbol table " << scopes[i];
+		if(scopes[i] == "BLOCK")
+		{
+			// Incremeting the number of blocks
+			total_blocks+=1;
+			cout<< " "<<total_blocks;
+		}
+		cout<<endl;
+		int j;
+		for(j=0;j<(table[i].attributes).size();j++){
+			if(table[i].attributes[j].type == "STRING"){			
+				cout<<"name "<<table[i].attributes[j].ID<< " type " <<"STRING " <<"value " << table[i].attributes[j].value<<endl; 
+			}
+			else{
+				cout<<"name "<<table[i].attributes[j].ID<< " type " << table[i].attributes[j].type<<endl; 	
+			}
+		} 
+		
+	}
+}
+	;
+id: IDENTIFIER {}
+;
+pgm_body:  decl func_declarations
+;
+decl: string_decl decl
+    | var_decl decl
+    | 
+;
+string_decl: STRING id ':''=' str ';'{
+	for(int i = 0; i < table[func_scope].attributes.size(); i++ ){
+		if(!strcmp(table[func_scope].attributes[i].ID,($2->first).c_str())){
+			cout<< "DECLARATION ERROR "<< $2->first << " (previous declaration was at line "<< table[func_scope].attributes[i].line_no<<")"<<endl;
+			return 0;
+		}
+	}
+	struct diff_types temp_struct;
+	temp_struct.ID = ($2->first).c_str();
+	//cout<<$2->first <<" "<<$2->second<<endl;
+	temp_struct.value = ($5->first).c_str();
+	temp_struct.type = "STRING";
+	temp_struct.line_no = $2->second;
+	table[func_scope].attributes.push_back(temp_struct);	
+
+}
+;
+str: STRINGLITERAL {}
+;
+var_decl: var_type {
+		decl_var = 1;
+		type_var = $1;
+} id_list ';' {}
+;
+var_type: FLOAT {}
+	| INT {}
+;
+any_type: var_type
+	| VOID
+;
+id_list: id {
+		if(decl_var == 1)
+		{
+			for(int i = 0; i < (table[func_scope].attributes).size(); i++ ){
+				if(!strcmp(table[func_scope].attributes[i].ID,($1->first).c_str())){
+					cout<< "DECLARATION ERROR "<< $1->first << " (previous declaration was at line "<< table[func_scope].attributes[i].line_no<<")"<<endl;
+					return 0;
+				}
+			}
+			
+			struct diff_types temp_struct;
+			temp_struct.ID = ($1->first).c_str();
+			//cout<<$1->first <<" "<<$1->second<<endl;
+			temp_struct.value = "VAL";
+			temp_struct.type = type_var;
+			temp_struct.line_no = $1->second;
+			table[func_scope].attributes.push_back(temp_struct);	
+			
+		}
+} id_tail {}
+;
+id_tail: ',' id {
+		if(decl_var == 1)
+		{
+			for(int i = 0; i < (table[func_scope].attributes).size(); i++ ){
+				if(!strcmp(table[func_scope].attributes[i].ID,($2->first).c_str())){
+					cout<< "DECLARATION ERROR "<< $2->first << " (previous declaration was at line "<< table[func_scope].attributes[i].line_no<<")"<<endl;
+					return 0;
+				}
+			}
+			struct diff_types temp_struct;
+			temp_struct.ID = ($2->first).c_str();
+			//cout<<$2->first <<" "<<$2->second<<endl;
+			temp_struct.value = "VAL";
+			temp_struct.type = type_var;
+			temp_struct.line_no = $2->second;
+			table[func_scope].attributes.push_back(temp_struct);	
+		}
+} id_tail {}
+       | {decl_var = 0;}
+;
+param_decl_list: param_decl param_decl_tail 
+	       | 
+;
+param_decl: var_type id {
+		
+			for(int i = 0; i < (table[func_scope].attributes).size(); i++ ){
+				if(!strcmp(table[func_scope].attributes[i].ID,($2->first).c_str())){
+					cout<< "DECLARATION ERROR "<< $2->first << " (previous declaration was at line "<< table[func_scope].attributes[i].line_no<<")"<<endl;
+					return 0;
+				}
+			}
+			struct diff_types temp_struct;
+			temp_struct.ID = ($2->first).c_str();
+			//cout<<$2->first <<" "<<$2->second<<endl;
+			temp_struct.value = "VAL";
+			temp_struct.type = $1;
+			temp_struct.line_no = $2->second;
+			table[func_scope].attributes.push_back(temp_struct);	
+	
+}
+;
+param_decl_tail: ',' param_decl param_decl_tail
+	       | 
+;
+func_declarations: func_decl func_declarations
+		| 
+;
+func_decl: FUNCTION any_type id {
+
+		func_scope++;
+		scopes.push_back(($3->first).c_str());
+		struct Sym_table temp_table;
+		table.push_back(temp_table);
+
+} '('param_decl_list')' _BEGIN func_body END
+;
+func_body: decl stmt_list
+;
+stmt_list: stmt stmt_list 
+	 | 
+;
+stmt: base_stmt
+	| if_stmt 
+	| while_stmt
+;
+base_stmt: assign_stmt
+	 | read_stmt
+	 | write_stmt
+	 | return_stmt
+;
+assign_stmt: assign_expr ';'
+;
+assign_expr: id ':''=' expr
+;
+read_stmt: READ '(' id_list ')'';'
+;
+write_stmt: WRITE '(' id_list ')'';'
+;
+return_stmt: RETURN expr ';'
+;
+expr: expr_prefix factor
+;
+expr_prefix: expr_prefix factor addop 
+	   | 
+;
+factor: factor_prefix postfix_expr
+;
+factor_prefix: factor_prefix postfix_expr mulop
+	     | 
+;
+postfix_expr: primary
+	    | call_expr
+;
+call_expr: id '(' expr_list ')'
+;
+expr_list: expr expr_list_tail 
+	 | 
+;
+expr_list_tail: ',' expr expr_list_tail
+	      | 
+;
+primary: '(' expr ')' 
+	| id 
+	| INTLITERAL
+	| FLOATLITERAL
+;
+addop: '+'
+	| '-'
+;
+mulop: '*'
+	| '/'
+;
+if_stmt: IF {
+	func_scope++;
+	scopes.push_back("BLOCK");
+	struct Sym_table temp_table;
+	table.push_back(temp_table);
+		
+} '(' cond ')' decl stmt_list else_part ENDIF
+;
+else_part: ELSE {
+		func_scope++;
+		scopes.push_back("BLOCK");
+		struct Sym_table temp_table;
+		table.push_back(temp_table);
+} decl stmt_list
+	| 
+;
+cond: expr compop expr
+;
+compop: '<'
+	| '>'
+	| '='
+	| '!''='
+	| '<''='
+	| '>''='
+;
+while_stmt: WHILE {
+		func_scope++;
+		scopes.push_back("BLOCK");
+		struct Sym_table temp_table;
+		table.push_back(temp_table);
+} '(' cond ')' decl aug_stmt_list ENDWHILE
+;
+aug_stmt_list: aug_stmt aug_stmt_list
+		| 
+;
+aug_stmt: base_stmt 
+	| aug_if_stmt
+	| while_stmt
+	| CONTINUE';'
+	| BREAK';'
+;
+aug_if_stmt: IF '(' cond ')' decl aug_stmt_list aug_else_part ENDIF
+;
+aug_else_part: ELSE decl aug_stmt_list
+		| 
+;
+
+
+%%
+

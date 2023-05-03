@@ -1,0 +1,1219 @@
+%{
+#include<stdio.h>
+#include<stdlib.h>
+#include<bits/stdc++.h>
+#include <cstdio>
+#include<iostream>
+#include <string.h>
+#include <utility>
+#include<tuple>
+#include<vector>
+using namespace std;
+
+
+
+int yylex();
+
+
+struct diff_types{
+	char const* ID;
+	const char* value;
+	const char* type;
+	int line_no;
+	string name;
+	int scope;
+	int block_scope;
+};
+
+
+struct Sym_table{
+	vector<diff_types> attributes;
+	vector<int>parent_scopes;
+};
+
+struct ast_node{
+	char const* node_val;
+	ast_node *left = nullptr;
+	ast_node *right = nullptr;
+	char const* type;
+	char const* identype = "NULL";
+	vector<ast_node*> ast_vec;
+};
+
+int func_scope = -1; // This is only for functions
+int scope_f = -1;
+int local_var_cnt = 0; // To assign how many local variables are there in a function
+int total_blocks = 0;
+vector <const char*> scopes;
+int decl_var = 0;
+char* type_var;
+int write_bool = 0;
+int read_bool = 0;
+int temp_cnt = 1;
+int inst_cnt = 0;
+int reg_cnt = 0;
+int label_val = 0;
+int temporaries = 0;
+int while_loop_val = 0;
+int func_par_cnt = 0;
+int push_cnt = 0;
+int current_scope = -1;
+string function_name;
+stack<int> label_stack;
+
+vector <Sym_table> table;
+vector <string> link_count_vec;
+
+vector<vector<string>> assembly;
+
+void symbol_table(){
+	cout<<"ID     "<< "Value       "<<"Type        "<< "line number      "<< "Name        "<< "Function scope      "<< "Block scope      \n";
+	for(int i=0; i<=func_scope;i++){
+		for(int j=0;j<(table[i].attributes).size();j++){
+				cout<<table[i].attributes[j].ID<< "         " <<table[i].attributes[j].value<<"         "<< table[i].attributes[j].type<<"       " <<table[i].attributes[j].line_no<< "        "<< table[i].attributes[j].name<<"      " << table[i].attributes[j].scope<<"          " << table[i].attributes[j].block_scope;
+		}
+		cout<<"Parents: ";
+		for(int j=0;j<(table[i].parent_scopes).size();j++){
+			cout<<"    "<<table[i].parent_scopes[j]<<"   ";
+		}
+		cout<<"\n";
+
+	}
+}
+
+void printLeafNodes(ast_node *root)
+{
+    if (!root){
+        return;
+        }
+     else{
+     	printLeafNodes(root->left);
+     	printLeafNodes(root->right);
+     	cout << root->node_val << "\n";
+     }
+}
+
+void register_allocation(string name,vector<string>& inst_vector){
+	//inst_vector.push_back("---------Register-----------------");
+	for(int i = 0; i< 4; i++){
+		inst_vector.push_back("push r" + to_string(i));
+	}
+	inst_vector.push_back("jsr " + name);
+	//assembly.push_back(inst_vector);
+}
+
+void register_deallocation(vector<string>& inst_vector){
+	for(int i = 3; i >= 0; i--){
+		inst_vector.push_back("pop r" + to_string(i));
+	}
+	//assembly.push_back(inst_vector);
+}
+
+string converting_names(string str_name){
+			//cout<<"str_name "<<str_name<<"\n";
+	for(int i = 0; i<table[current_scope].parent_scopes.size();i++){
+		int x = table[current_scope].parent_scopes[i];
+		//cout<<"current scope: "<<func_scope<<"Parent scopes:   "<<x<<"\n";
+		for(int j = 0; j< (table[x].attributes).size();j++){
+			if(table[x].attributes[j].ID == str_name){
+				if(table[x].attributes[j].type == "STRING"){
+					//cout<<"str_name "<<str_name<<"Alias name  "<<table[x].attributes[j].name<<"\n";
+					string n_con = table[x].attributes[j].name;
+					return n_con;
+				}
+				else{
+					if(table[x].attributes[j].scope == 0){
+						string n_con = table[x].attributes[j].ID;
+						return n_con;
+					}
+					else{
+						string n_con = table[x].attributes[j].name;
+						return n_con;
+					}
+				}
+			}
+		}
+	}
+
+	return "none" ;
+}
+
+tuple <string, int, int> identifier_type(string x){
+	// Consider only the local scope and global scope. Do not traverse through entire symbol table.
+	int i,j;
+	for(i=0; i<=func_scope;i++){
+		for(j=0;j<(table[i].attributes).size();j++){
+			if(table[i].attributes[j].ID == x){
+				if(!strcmp(table[i].attributes[j].type, "INT")){
+					return make_tuple("INT",i,j);
+				}
+				else if(!strcmp(table[i].attributes[j].type, "FLOAT")){
+					return make_tuple("FLOAT",i,j);
+				}
+				else if(!strcmp(table[i].attributes[j].type, "STRING")){
+					return make_tuple("STRING",i,j);
+				}
+			}
+		}
+
+	}
+	return make_tuple("NULL",i,j);
+}
+
+tuple <string, string> assembly_code(ast_node *root, vector<string>& inst_vector){
+
+	if (!root){
+        return make_tuple("NULL", "NULL");
+        }
+     	else{
+	     	string l_val, r_val, l_type, r_type;
+	     	tie(l_val, l_type) = assembly_code(root->left, inst_vector);
+	     	tie(r_val, r_type) = assembly_code(root->right, inst_vector);
+	     	if(root->type == "INTLITERAL"){
+	     		string p = root->node_val;
+	     		//string reg = "r" + to_string(reg_cnt);
+	     		string temporary = "T" + to_string(temporaries);
+	     		string temp = "move " + p + " " + "r0";
+	     		string next = "move r0 " + temporary;
+	     		//reg_cnt++;
+	     		temporaries++;
+	     		//cout<<temp<<"\n";
+	     		inst_vector.push_back(temp);
+	     		inst_vector.push_back(next);
+	     		return make_tuple(temporary, "INT");
+	     	}
+	     	else if(root->type == "FLOATLITERAL"){
+	     		string p = root->node_val;
+	     		//string reg = "r" + to_string(reg_cnt);
+	     		string temporary = "T" + to_string(temporaries);
+	     		string temp = "move " + p + " " + "r0";
+	     		string next = "move r0 " + temporary;
+	     		//reg_cnt++;
+	     		temporaries++;
+	     		//cout<<temp<<"\n";
+	     		inst_vector.push_back(temp);
+	     		inst_vector.push_back(next);
+	     		return make_tuple(temporary, "FLOAT");
+	     	}
+	     	else if(root->type == "ASSIGNMENT"){
+	     		if((root->left)->type == "IDENTIFIER" && (root->right)->type == "IDENTIFIER"){
+	     			string temporary = "T" + to_string(temporaries);
+	     			//string reg = "r" + to_string(reg_cnt);
+	     			string name1 = converting_names(r_val);
+	     			string name2 = converting_names(l_val);
+	     			string temp1 = "move " + name1 + " r0";
+	     			string temp2 = "move r0 " + name2;
+	     			temporaries++;
+	     			//reg_cnt++;
+	     			inst_vector.push_back(temp1);
+	     			//inst_vector.push_back(next1);
+	     			inst_vector.push_back(temp2);
+	     		}
+	     		else{
+	     			string name1 = converting_names(r_val);
+	     			string name2 = converting_names(l_val);
+	     			if(name1!="none" && name2 == "none"){
+	     				string temp = "move " + name1 + " r0" ;
+	     				string next = "move r0 " + l_val;
+	     				inst_vector.push_back(temp);
+	     				inst_vector.push_back(next);
+	     			}
+	     			else if(name2!="none" && name1 == "none"){
+	     				string next = "move " + r_val + " r0";
+	     				string temp = "move r0 " + name2;
+	     				inst_vector.push_back(next);
+	     				inst_vector.push_back(temp);
+	     			}
+	     			else{
+	     				string next = "move " + r_val + " r0";
+	     				string temp = "move r0 " + l_val;
+	     				inst_vector.push_back(next);
+	     				inst_vector.push_back(temp);
+	     			}
+	     		}
+     			//cout<<temp<<"\n";
+	     		return make_tuple("NULL", "NULL");
+	     	}
+	     	else if(root->type == "OPERATOR"){
+	     		string op;
+	     		if(root->node_val == "+"){op = "add";}
+	     		else if(root->node_val == "-"){op = "sub";}
+	     		else if(root->node_val == "*"){op = "mul";}
+	     		else if(root->node_val == "/"){op = "div";}
+	     		if(l_type == "FLOAT" || r_type == "FLOAT"){
+	     			string temporary = "T" + to_string(temporaries);
+		     		//string reg = "r" + to_string(reg_cnt);
+		     		string name1 = converting_names(r_val);
+	     			string name2 = converting_names(l_val);
+	     			if(name2!="none"){
+	     				string temp1 = "move " + name2 + " r0";
+	     				string next1 = "move r0 " + temporary;
+	     				inst_vector.push_back(temp1);
+	     				inst_vector.push_back(next1);
+	     			}
+	     			else{
+		     		string temp1 = "move " + l_val + " r0";
+		     		string next1 = "move r0 " + temporary;
+		     		inst_vector.push_back(temp1);
+		     		inst_vector.push_back(next1);}
+		     		if(name1!= "none"){
+		     		string next2 = "move " + temporary + " r0";
+		     		string temp2 = op + "r " + name1 + " r0";
+		     		string next3 = "move r0 " + temporary;
+		     		inst_vector.push_back(next2);
+		     		inst_vector.push_back(temp2);
+		     		inst_vector.push_back(next3);}
+		     		else{
+		     		string next2 = "move " + temporary + " r0";
+	     			string temp2 = op + "r " + r_val + " r0";
+	     			string next3 = "move r0 " + temporary;
+	     			inst_vector.push_back(next2);
+		     		inst_vector.push_back(temp2);
+		     		inst_vector.push_back(next3);
+	     			}
+	     			//reg_cnt++;
+	     			temporaries++;
+	     			return make_tuple(temporary, "FLOAT");
+	     		}
+	     		else{
+	     			string temporary = "T" + to_string(temporaries);
+	     			//string reg = "r" + to_string(reg_cnt);
+	     			string name1 = converting_names(r_val);
+	     			string name2 = converting_names(l_val);
+	     			if(name2!="none"){
+	     				string temp1 = "move " + name2 + " r0";
+	     				string next1 = "move r0 " + temporary;
+	     				inst_vector.push_back(temp1);
+	     				inst_vector.push_back(next1);
+	     			}
+	     			else{
+		     		string temp1 = "move " + l_val + " r0";
+		     		string next1 = "move r0 " + temporary;
+		     		inst_vector.push_back(temp1);
+		     		inst_vector.push_back(next1);}
+		     		if(name1!= "none"){  string next2 = "move " + temporary + " r0";
+		     		string temp2 = op + "i " + name1 + " r0";
+		     		string next3 = "move r0 " + temporary;
+		     		inst_vector.push_back(next2);
+		     		inst_vector.push_back(temp2);
+		     		inst_vector.push_back(next3);}
+		     		else{
+	     			string next2 = "move " + temporary + " r0";
+	     			string temp2 = op + "i " + r_val + " r0";
+	     			string next3 = "move r0 " + temporary;
+	     			inst_vector.push_back(next2);
+		     		inst_vector.push_back(temp2);
+		     		inst_vector.push_back(next3);
+	     			}
+	     			//reg_cnt++;
+	     			temporaries++;
+	     			//cout<<temp1<<"\n"<<temp2<<"\n";
+	     			return make_tuple(temporary, "INT");
+	     		}
+	     	}
+	     	else if(root->type == "lt" || root->type == "gt" || root->type == "eq" || root->type == "ne" || root->type == "le" || root->type == "ge"){
+	     		string x = root->type;
+	     		string y,b;
+	     		if(x == "lt"){y = "ge";}
+	     		else if(x == "gt"){y = "le";}
+	     		else if(x == "eq"){y = "ne";}
+	     		else if(x == "ne"){y = "eq";}
+	     		else if(x == "le"){y = "gt";}
+	     		else if(x == "ge"){y = "lt";}
+	     		if(l_type == "FLOAT" || r_type == "FLOAT"){
+	     			b = "r";
+	     		}
+	     		else{
+	     			b = "i";
+	     		}
+	     		if((root->left)->type == "IDENTIFIER" && (root->right)->type == "IDENTIFIER"){
+	     			string temporary = "T" + to_string(temporaries);
+	     			//string reg = "r" + to_string(reg_cnt);
+	     			string name1 = converting_names(r_val);
+	     			string name2 = converting_names(l_val);
+	     			if(name1!="none"){
+	     				string temp1 = "move " + name1 + " r0";
+					string next1 = "move r0 " + temporary;
+	     				inst_vector.push_back(temp1);
+	     				inst_vector.push_back(next1);
+	     			}
+	     			else{
+		     		string temp1 = "move " + r_val + " r0";
+		     		string next1 = "move r0 " + temporary;
+	     				inst_vector.push_back(temp1);
+	     				inst_vector.push_back(next1);
+				}
+	     			if(name2!="none"){
+	     				string next2 = "move " + temporary + " r0";
+	     				string temp2 = "cmp" + b + " " + name2 + " r0";
+	     				//string next3 = "move r0 " + temporary;
+	     				inst_vector.push_back(next2);
+	     				inst_vector.push_back(temp2);
+	     			}
+	     			else{
+		     			string next2 = "mov " + temporary + " r0";
+			     		string temp2 = "cmp" + b + " " + l_val + " r0";
+			     		//string next3 = "move r0 " + temporary;
+			     		inst_vector.push_back(next2);
+			     		inst_vector.push_back(temp2);
+			     		//inst_vector.push_back(next3);
+		     		}
+	     			//reg_cnt++;
+	     			temporaries++;
+	     		}
+	     		else{
+	     			string name1 = converting_names(r_val);
+	     			string name2 = converting_names(l_val);
+
+	     			if(name1!="none" && name2 == "none"){
+	     				string next1 = "move " + l_val + " r0";
+	     				string next2 = "move " + name1 + " r1";
+	     				string temp1 = "cmp" + b + " r0 r1";
+	     				inst_vector.push_back(next1);
+	     				inst_vector.push_back(next2);
+	     				inst_vector.push_back(temp1);
+	     			}
+	     			else if(name2!="none" && name1 == "none"){
+	     				string temp1 = "cmp" + b + " " + name2 + " r0";
+	     				string next1 = "move r0 " + r_val;
+	     				inst_vector.push_back(temp1);
+	     				inst_vector.push_back(next1);
+	     			}
+	     			else{
+	     				string next1 = "move " + l_val + " r0";
+	     				string next2 = "move " + r_val + " r1";
+	     				string temp1 = "cmp" + b + " r0 r1";
+	     				inst_vector.push_back(next1);
+	     				inst_vector.push_back(temp1);
+	     			}
+
+	     		}
+
+	     		string temp3 = "j" + y + " label" + to_string(label_stack.top());
+	     		inst_vector.push_back(temp3);
+	     		return make_tuple("NULL", "NULL");
+	     	}
+	     	else if(root->type == "CALL"){
+	     		vector<string> push_vector;
+	     		push_cnt = 0;
+	     		push_vector.push_back("push");
+	     		//inst_vector.push_back("push");
+	     		string val_reg,type_reg;
+	     		for(int i=0;i<(root->ast_vec.size());i++){
+	     			tie(val_reg, type_reg) = assembly_code((root->ast_vec)[i], inst_vector);
+	     			//string reg;
+	     			string temporary;
+	     			string alias_name = converting_names(val_reg);
+				if(alias_name!="none"){
+					temporary = "T" + to_string(temporaries);
+					//reg = "r" + to_string(reg_cnt);
+					inst_vector.push_back("move " + alias_name + " r0");
+					inst_vector.push_back("move r0 " + temporary);
+					//reg_cnt++;
+					temporaries++;
+				}
+				else{
+					//reg = "r" + to_string(reg_cnt-1);
+					temporary = "T" + to_string(temporaries-1);
+				}
+	     			/*
+	     			if(reg_cnt == 0){
+	     				reg = converting_names(val_reg);
+	     			}
+	     			else{
+	     				reg = "r" + to_string(reg_cnt-1);
+	     			}*/
+	     			push_vector.push_back("push " + temporary);
+	     			push_cnt++;
+	     		}
+	     		for(int k = 0; k<push_vector.size();k++){
+	     			//cout<<"------"<<push_vector[k]<<"-------\n";
+	     			inst_vector.push_back(push_vector[k]);
+	     		}
+			//assembly.push_back(instruction);
+			register_allocation(function_name,inst_vector);
+			register_deallocation(inst_vector);
+			for(int i = 0; i<push_vector.size() - 1;i++){
+				inst_vector.push_back("pop");
+			}
+			push_cnt=0;
+			//string reg = "r" + to_string(reg_cnt);
+			string temporary = "T" + to_string(temporaries);
+			vector<string> new_inst;
+			inst_vector.push_back("pop " + temporary);
+			//reg_cnt++;
+			temporaries++;
+			//assembly.push_back(inst_vector);
+			return make_tuple(temporary, "CALL");
+	     	}
+	     	else if(root->type == "IDENTIFIER"){
+			string y = root->identype;
+			if(y == "INT"){
+				string x = root->node_val;
+				return make_tuple(x, "INT");
+			}
+			else if(y == "FLOAT"){
+				string x = root->node_val;
+				return make_tuple(x, "FLOAT");
+			}
+	     	}
+	     	return make_tuple("NULL", "NULL");
+     }
+
+}
+
+void yyerror(const char* msg);
+
+
+%}
+// Capital letters are all terminals
+%token PROGRAM
+%token _BEGIN
+%token END
+%token IDENTIFIER
+%token STRING
+%token STRINGLITERAL
+%token FLOAT
+%token INT
+%token VOID
+%token FUNCTION
+%token READ
+%token WRITE
+%token RETURN
+%token INTLITERAL
+%token FLOATLITERAL
+%token IF
+%token ENDIF
+%token ELSE
+%token WHILE
+%token ENDWHILE
+%token CONTINUE
+%token BREAK
+
+
+%type <s> id str
+%type <v> var_type INTLITERAL FLOATLITERAL
+%type <ast> mulop addop primary postfix_expr factor_prefix factor expr_prefix expr assign_expr compop if_stmt else_part cond call_expr
+%type <ast_vec> expr_list_tail expr_list
+
+
+%union{
+std::pair<std::string,int> * s;
+char * v;
+int ival;
+float fval;
+struct ast_node *ast;
+std::vector<ast_node*>*ast_vec;
+}
+
+%%
+
+program: PROGRAM id _BEGIN {
+		func_scope++;
+		current_scope = func_scope;
+		scope_f++;
+		local_var_cnt = 0;
+		scopes.push_back("GLOBAL");
+		struct Sym_table temp_table;
+		table.push_back(temp_table);
+		table[func_scope].parent_scopes.push_back(0);
+
+}
+pgm_body END
+{
+	for(int i=0; i<=func_scope;i++){
+		if(i>=1)
+		{
+			//cout<<endl;
+		}
+
+		//cout<<"Symbol table " << scopes[i];
+		if(scopes[i] == "BLOCK")
+		{
+			// Incremeting the number of blocks
+			total_blocks+=1;
+			//cout<< " "<<total_blocks;
+		}
+		//cout<<endl;
+		for(int j=0;j<(table[i].attributes).size();j++){
+			if(table[i].attributes[j].type == "STRING"){
+				//cout<<"name "<<table[i].attributes[j].ID<< " type " <<"STRING " <<"value " << table[i].attributes[j].value <<" alias_name" << table[i].attributes[j].name<<" Function scope " << table[i].attributes[j].scope<<" Block scope " << table[i].attributes[j].block_scope<< endl;
+			}
+			else{
+				//cout<<"name "<<table[i].attributes[j].ID<< " type " << table[i].attributes[j].type<<" alias_name" << table[i].attributes[j].name<<" Function scope " << table[i].attributes[j].scope<<" Block scope " << table[i].attributes[j].block_scope<<endl;
+			}
+		}
+
+	}
+	//symbol_table();
+
+	for(int i=0; i<=func_scope;i++){
+		for(int j=0;j<(table[i].attributes).size();j++){
+			if(table[i].attributes[j].type == "STRING"){
+				cout<<"str "<<table[i].attributes[j].name<< " " <<table[i].attributes[j].value<<"\n";
+			}
+		}
+	}
+
+
+	/*for(int m = 0; m < func_scope;m++){
+		for(int n=0;n<(table[m].attributes).size();n++){
+			if(table[m].attributes[n].type == "STRING"){
+				cout<<"str "<<table[m].attributes[n].ID<<" "<<table[m].attributes[n].value<<" \n";
+			}
+		}
+	}*/
+
+	for(int i=0; i<=temporaries;i++){
+		cout<<"var T"<<i<<"\n";
+	}
+
+	for (int p = 0; p < assembly.size(); p++) {
+        for (int q = 0; q < assembly[p].size(); q++)
+        	if(assembly[p][q] == "link"){
+        		cout << assembly[p][q] <<" "<<link_count_vec[0]<< "\n";
+        		link_count_vec.erase(link_count_vec.begin());
+        	}
+        	else{
+            		cout << assembly[p][q] << "\n";
+            		}
+    	}
+	cout<<"end";
+}
+	;
+id: IDENTIFIER {}
+;
+pgm_body:  decl{
+	vector<string> inst_vector;
+	inst_vector.push_back("push");
+	register_allocation("main",inst_vector);
+	inst_vector.push_back("sys halt");
+	assembly.push_back(inst_vector);
+} func_declarations{
+}
+;
+decl: string_decl decl
+    | var_decl decl
+    |
+;
+string_decl: STRING id ':''=' str ';'{
+	for(int i = 0; i < table[func_scope].attributes.size(); i++ ){
+		if(!strcmp(table[func_scope].attributes[i].ID,($2->first).c_str())){
+			cout<< "DECLARATION ERROR "<< $2->first << " (previous declaration was at line "<< table[func_scope].attributes[i].line_no<<")"<<endl;
+			return 0;
+		}
+	}
+	struct diff_types temp_struct;
+	temp_struct.ID = ($2->first).c_str();
+	//cout<<$2->first <<" "<<$2->second<<endl;
+	temp_struct.value = ($5->first).c_str();
+	temp_struct.type = "STRING";
+	temp_struct.line_no = $2->second;
+	temp_struct.block_scope = func_scope;
+	temp_struct.scope = scope_f;
+	temp_struct.name = $2->first + "_" + to_string(current_scope);
+	//temp_struct.name = "$" + to_string(local_var_cnt);
+	//temp_struct.scope = scope_f;
+	table[func_scope].attributes.push_back(temp_struct);
+	//ector<string> inst_vector;
+	//cout<<"str "<<$2->first<<" "<<$5->first;
+	//inst_vector.push_back("str "+ $2->first + " " + $5->first);
+	//assembly.push_back(inst_vector);
+}
+;
+str: STRINGLITERAL {}
+;
+var_decl: var_type {
+		decl_var = 1;
+		type_var = $1;
+} id_list ';' { }
+;
+var_type: FLOAT {}
+	| INT {}
+;
+any_type: var_type
+	| VOID
+;
+id_list: id {
+		if(decl_var == 1)
+		{
+			for(int i = 0; i < (table[func_scope].attributes).size(); i++ ){
+				if(!strcmp(table[func_scope].attributes[i].ID,($1->first).c_str())){
+					cout<< "DECLARATION ERROR "<< $1->first << " (previous declaration was at line "<< table[func_scope].attributes[i].line_no<<")"<<endl;
+					return 0;
+				}
+			}
+
+			struct diff_types temp_struct;
+			temp_struct.ID = ($1->first).c_str();
+			//cout<<$1->first <<" "<<$1->second<<endl;
+			temp_struct.value = "VAL";
+			temp_struct.type = type_var;
+			temp_struct.line_no = $1->second;
+			temp_struct.block_scope = func_scope;
+			if(func_scope == 0){
+				temp_struct.scope = scope_f;
+				vector<string> inst_vector;
+				//cout<<"var "<<$1->first<<"\n";
+				inst_vector.push_back("var " + $1->first);
+				assembly.push_back(inst_vector);
+			}
+			else{
+				local_var_cnt++;
+				//cout<<"Link count : "<<local_var_cnt<<"\n";
+				temp_struct.name = "$-" + to_string(local_var_cnt);
+				temp_struct.scope = scope_f;
+			}
+			//cout<<"ID: "<<temp_struct.ID <<"   Type: "<<temp_struct.type<<"   Function scope: "<<temp_struct.scope<<"  Block scope: "<<temp_struct.block_scope<<"\n";
+			table[func_scope].attributes.push_back(temp_struct);
+			read_bool = 0; write_bool = 0;
+
+		}
+		if(write_bool == 1){
+			string itype; int p,q;
+			vector<string> inst_vector;
+			tie(itype,p,q) = identifier_type($1->first);
+			//cout<<"fUNCTION sCOPE"<<;
+			if(itype == "INT"){inst_vector.push_back("sys writei " + converting_names(($1->first).c_str()));}
+			else if(itype == "FLOAT"){inst_vector.push_back("sys writer " + converting_names(($1->first).c_str()));}
+			else if(itype == "STRING"){
+			string new_name = converting_names(($1->first).c_str());
+			inst_vector.push_back("sys writes " + new_name);
+			}
+			assembly.push_back(inst_vector);
+		}
+		if(read_bool == 1){
+			string itype; int p,q;
+			vector<string> inst_vector;
+			tie(itype,p,q) = identifier_type($1->first);
+			if(itype == "INT"){inst_vector.push_back("sys readi " + converting_names(($1->first).c_str()) );}
+			else{inst_vector.push_back("sys readr " + converting_names(($1->first).c_str()) );}
+			assembly.push_back(inst_vector);
+		}
+} id_tail {}
+;
+id_tail: ',' id {
+		if(decl_var == 1)
+		{
+			for(int i = 0; i < (table[func_scope].attributes).size(); i++ ){
+				if(!strcmp(table[func_scope].attributes[i].ID,($2->first).c_str())){
+					cout<< "DECLARATION ERROR "<< $2->first << " (previous declaration was at line "<< table[func_scope].attributes[i].line_no<<")"<<endl;
+					return 0;
+				}
+			}
+			struct diff_types temp_struct;
+			temp_struct.ID = ($2->first).c_str();
+			//cout<<$2->first <<" "<<$2->second<<endl;
+			temp_struct.value = "VAL";
+			temp_struct.type = type_var;
+			temp_struct.line_no = $2->second;
+			temp_struct.block_scope = func_scope;
+			if(func_scope == 0){
+				temp_struct.scope = scope_f;
+				vector<string> inst_vector;
+				//cout<<"var "<<$2->first<<"\n";
+				inst_vector.push_back("var " + $2->first);
+				assembly.push_back(inst_vector);
+			}
+			else{
+				local_var_cnt++;
+				temp_struct.name = "$-" + to_string(local_var_cnt);
+				temp_struct.scope = scope_f;
+				//vector<string> inst_vector;
+				//inst_vector.push_back(temp_struct.name);
+				//assembly.push_back(inst_vector);
+			}
+			//cout<<"ID: "<<temp_struct.ID <<"   Type: "<<temp_struct.type<<"   Function scope: "<<temp_struct.scope<<"  Block scope: "<<temp_struct.block_scope<<"\n";
+			table[func_scope].attributes.push_back(temp_struct);
+			read_bool = 0; write_bool = 0;
+		}
+		if(write_bool == 1){
+			string itype; int p,q;
+			vector<string> inst_vector;
+			tie(itype,p,q) = identifier_type($2->first);
+			if(itype == "INT"){inst_vector.push_back("sys writei " + converting_names(($2->first).c_str()) );}
+			else if(itype == "FLOAT"){inst_vector.push_back("sys writer " + converting_names(($2->first).c_str()));}
+			else if(itype == "STRING"){
+			string new_name = converting_names(($2->first).c_str());
+			inst_vector.push_back("sys writes " + new_name);
+			}
+			assembly.push_back(inst_vector);
+		}
+		if(read_bool == 1){
+			string itype; int p,q;
+			vector<string> inst_vector;
+			tie(itype,p,q) = identifier_type($2->first);
+			if(itype == "INT"){inst_vector.push_back("sys readi " + converting_names(($2->first).c_str()) );}
+			else{inst_vector.push_back("sys readr " + converting_names(($2->first).c_str()));}
+			assembly.push_back(inst_vector);
+		}
+} id_tail {}
+       | {decl_var = 0;}
+;
+param_decl_list: param_decl param_decl_tail{ }
+	       |
+;
+param_decl: var_type id {
+
+			for(int i = 0; i < (table[func_scope].attributes).size(); i++ ){
+				if(!strcmp(table[func_scope].attributes[i].ID,($2->first).c_str())){
+					cout<< "DECLARATION ERROR "<< $2->first << " (previous declaration was at line "<< table[func_scope].attributes[i].line_no<<")"<<endl;
+					return 0;
+				}
+			}
+			struct diff_types temp_struct;
+			temp_struct.ID = ($2->first).c_str();
+			//cout<<$2->first <<" "<<$2->second<<endl;
+			temp_struct.value = "VAL";
+			temp_struct.type = $1;
+			temp_struct.line_no = $2->second;
+			temp_struct.block_scope = func_scope;
+			func_par_cnt++;
+			int val_cnt = 5 + func_par_cnt;
+			temp_struct.name = "$" + to_string(val_cnt);
+			temp_struct.scope = scope_f;
+			table[func_scope].attributes.push_back(temp_struct);
+
+}
+;
+param_decl_tail: ',' param_decl param_decl_tail{ }
+	       |
+;
+func_declarations: func_decl func_declarations{ }
+		|
+;
+func_decl: FUNCTION any_type id {
+
+		func_scope++;
+		scope_f++;
+		local_var_cnt = 0;
+		func_par_cnt = 0;
+		//reg_cnt = 0;
+		//temporaries = 0;
+		scopes.push_back(($3->first).c_str());
+		struct Sym_table temp_table;
+		table.push_back(temp_table);
+
+		// _______________________________
+		table[func_scope].parent_scopes.push_back(func_scope);
+		for(int i = 0; i<table[current_scope].parent_scopes.size();i++){
+			table[func_scope].parent_scopes.push_back(table[current_scope].parent_scopes[i]);
+		}
+		current_scope = func_scope;
+		//_________________________________
+
+		vector<string> inst_vector;
+		inst_vector.push_back("label " + $3->first);
+	assembly.push_back(inst_vector);
+
+} '('{ } param_decl_list')'{ } _BEGIN func_body END{
+	current_scope = table[current_scope].parent_scopes[1];
+ }
+;
+func_body: decl{
+		vector<string> inst_vector;
+		inst_vector.push_back("link");
+		assembly.push_back(inst_vector);
+ } stmt_list{link_count_vec.push_back(to_string(local_var_cnt));}
+;
+stmt_list: stmt stmt_list {}
+	 |
+;
+stmt: base_stmt
+	| if_stmt
+	| while_stmt
+;
+base_stmt: assign_stmt
+	 | read_stmt
+	 | write_stmt
+	 | return_stmt
+;
+assign_stmt: assign_expr ';'
+;
+assign_expr: id ':''=' expr{
+	ast_node *node = new ast_node;
+	ast_node *left_node = new ast_node;
+	left_node->node_val = ($1->first).c_str();
+	left_node->type = "IDENTIFIER";
+	node->node_val = ":=";
+	node->type = "ASSIGNMENT";
+	int i;
+	for(i=0; i<=func_scope;i++){
+		int j;
+		for(j=0;j<(table[i].attributes).size();j++){
+			if(table[i].attributes[j].ID == $1->first){
+				if(!strcmp(table[i].attributes[j].type, "INT")){
+					left_node->identype = "INT";
+				}
+				else if(!strcmp(table[i].attributes[j].type, "FLOAT")){
+					left_node->identype = "FLOAT";
+				}
+			}
+		}
+	}
+	node->left = left_node;
+	node->right = $4;
+	 //printLeafNodes(node);
+	 string val1,val2;
+	vector<string> inst_vector;
+	tie(val1, val2) = assembly_code(node, inst_vector);
+	assembly.push_back(inst_vector);
+}
+;
+read_stmt: READ{
+	read_bool = 1;
+	write_bool = 0;
+} '(' id_list ')'';'
+;
+write_stmt: WRITE
+{
+	write_bool = 1;
+	read_bool = 0;
+} '(' id_list ')'';'
+
+;
+return_stmt: RETURN expr ';'{
+	string val1,val2;
+	vector<string> inst_vector;
+	tie(val1, val2) = assembly_code($2, inst_vector);
+	//string reg;
+	string temporary;
+	//cout<<"___________________"<<val1<<"___________________"<<val2<<"\n";
+	string alias_name = converting_names(val1);
+	if(alias_name!="none"){
+		//reg = "r" + to_string(reg_cnt);
+		temporary = "T" + to_string(temporaries);
+		inst_vector.push_back("move " + alias_name + " r0");
+		inst_vector.push_back("move r0 " + temporary);
+		//reg_cnt++;
+		temporaries++;
+	}
+	else{
+		//reg = "r" + to_string(reg_cnt-1);
+		temporary = "T" + to_string(temporaries-1);
+	}
+	inst_vector.push_back("move " + temporary + " r1");
+	inst_vector.push_back("move r1 $" + to_string(5 + func_par_cnt+1));
+	inst_vector.push_back("unlnk");
+	inst_vector.push_back("ret");
+	assembly.push_back(inst_vector);
+
+}
+;
+expr: expr_prefix factor{
+	if ($1 == nullptr){
+            $$ = $2;
+        }
+        else {
+            $1->right = $2;
+            $$ = $1;
+        }
+}
+;
+expr_prefix: expr_prefix factor addop {
+	if ($1 == nullptr){
+            $3->left = $2;
+        }
+        else {
+            $1->right = $2;
+            $3->left = $1;
+        }
+        $$ = $3;
+}
+	   | {$$ = nullptr;}
+;
+factor: factor_prefix postfix_expr {
+	if ($1 == nullptr){
+        	$$ = $2;
+        }
+        else
+        {
+            $1->right = $2;
+            $$ = $1;
+        }
+}
+;
+factor_prefix: factor_prefix postfix_expr mulop {
+	if($1 == nullptr){
+		$3->left = $2;
+	}
+	else{
+		$1->right = $2;
+		$3->left = $1;
+	}
+	$$ = $3;
+}
+	     | {$$ = nullptr;}
+;
+postfix_expr: primary {
+	$$ = $1;
+}
+	    | call_expr {$$=$1;}
+;
+call_expr: id '(' expr_list ')'{
+	function_name = ($1->first).c_str();
+	$$ = new ast_node;
+	$$->type = "CALL";
+	$$->node_val = ($1->first).c_str();
+	$$->ast_vec = *$3;
+	push_cnt = 0;
+
+}
+;
+expr_list: expr expr_list_tail{
+	$$ = $2;
+	$$ -> push_back($1);
+ }
+	 | {
+	 vector<ast_node*>* temp_vec = new vector<ast_node*>;
+	 $$ = temp_vec;
+	 }
+;
+expr_list_tail: ',' expr expr_list_tail{
+	$$ = $3;
+	$$ -> push_back($2);
+}
+	      | {
+	      		vector<ast_node*>* temp_vec = new vector<ast_node*>;
+	 		$$ = temp_vec;
+	      }
+;
+primary: '(' expr ')' {$$ = $2;}
+	| id {
+		$$ = new ast_node;
+		$$->node_val = ($1->first).c_str();
+		$$->type = "IDENTIFIER";
+		string itype; int p,q;
+		tie(itype,p,q) = identifier_type($1->first);
+		if(itype == "INT"){
+			$$->identype = "INT";
+		}
+		else if(itype == "FLOAT"){
+			$$->identype = "FLOAT";
+		}
+	}
+	| INTLITERAL {
+		$$ = new ast_node;
+		$$->node_val = $1;
+		$$->type = "INTLITERAL";
+	}
+	| FLOATLITERAL {
+		$$ = new ast_node;
+		$$->node_val = $1;
+		$$->type = "FLOATLITERAL";
+	}
+;
+addop: '+' {
+	$$ = new ast_node;
+	$$->type = "OPERATOR";
+	$$->node_val = "+";
+}
+	| '-' {
+		$$ = new ast_node;
+		$$->type = "OPERATOR";
+		$$->node_val = "-";
+	}
+;
+mulop: '*' {
+	$$ = new ast_node;
+	$$->type = "OPERATOR";
+	$$->node_val = "*";
+}
+	| '/' {
+	$$ = new ast_node;
+	$$->type = "OPERATOR";
+	$$->node_val = "/";
+}
+;
+if_stmt: IF {
+	func_scope++;
+	scopes.push_back("BLOCK");
+	struct Sym_table temp_table;
+	table.push_back(temp_table);
+	// _______________________________
+		table[func_scope].parent_scopes.push_back(func_scope);
+		for(int i = 0; i<(table[current_scope].parent_scopes).size();i++){
+			table[func_scope].parent_scopes.push_back(table[current_scope].parent_scopes[i]);
+		}
+		current_scope = func_scope;
+		//_________________________________
+	label_val = label_val + 2;
+	label_stack.push(label_val - 1);
+
+} '(' cond ')' decl stmt_list {
+	vector<string> inst_vector;
+	string jump_label = to_string(label_stack.top() + 1);
+	string temp1 = "jmp label" + jump_label;
+	// For the beginning of else label
+	string else_label = to_string(label_stack.top());
+	string temp2 = "label label" + else_label;
+	//cout<<temp1<<"\n"<<temp2<<"\n";
+	inst_vector.push_back(temp1);
+	inst_vector.push_back(temp2);
+	assembly.push_back(inst_vector);
+
+	current_scope = table[current_scope].parent_scopes[1];
+
+} else_part ENDIF {
+	vector<string> inst_vector;
+	string end_label = to_string(label_stack.top() + 1);
+	string temp = "label label" + end_label;
+	inst_vector.push_back(temp);
+	assembly.push_back(inst_vector);
+
+
+
+	//cout<<temp<<"\n";
+	label_stack.pop();
+}
+;
+else_part: ELSE {
+		func_scope++;
+		scopes.push_back("BLOCK");
+		struct Sym_table temp_table;
+		table.push_back(temp_table);
+		// _______________________________
+		table[func_scope].parent_scopes.push_back(func_scope);
+		for(int i = 0; i<(table[current_scope].parent_scopes).size();i++){
+			table[func_scope].parent_scopes.push_back(table[current_scope].parent_scopes[i]);
+		}
+		current_scope = func_scope;
+		//_________________________________
+} decl stmt_list { current_scope = table[current_scope].parent_scopes[1];
+ }
+	| {}
+;
+cond: expr compop expr {
+	 $2->left = $1;
+         $2->right = $3;
+         $$ = $2;
+         //printLeafNodes($2);
+         string val1,val2;
+	vector<string> inst_vector;
+	tie(val1, val2) = assembly_code($2, inst_vector);
+	assembly.push_back(inst_vector);
+}
+;
+compop: '<' {$$ = new ast_node; $$->type = "lt"; 	$$->node_val = "<"; }
+	| '>' {$$ = new ast_node; $$->type = "gt"; 	$$->node_val = ">"; }
+	| '=' {$$ = new ast_node; $$->type = "eq"; 	$$->node_val = "="; }
+	| '!''=' {$$ = new ast_node; $$->type = "ne"; 	$$->node_val = "!="; }
+	| '<''=' {$$ = new ast_node; $$->type = "le"; 	$$->node_val = "<="; }
+	| '>''=' {$$ = new ast_node; $$->type = "ge"; 	$$->node_val = ">="; }
+;
+while_stmt: WHILE {
+		func_scope++;
+		//current_scope++;
+		scopes.push_back("BLOCK");
+		struct Sym_table temp_table;
+		table.push_back(temp_table);
+		//table.push_back(temp_table);
+		// _______________________________
+		table[func_scope].parent_scopes.push_back(func_scope);
+		for(int i = 0; i<(table[current_scope].parent_scopes).size();i++){
+			table[func_scope].parent_scopes.push_back(table[current_scope].parent_scopes[i]);
+		}
+		current_scope = func_scope;
+		//_________________________________
+		label_val = label_val + 2;
+		label_stack.push(label_val - 1);
+		vector<string> inst_vector;
+		string temp = "label label" + to_string(label_stack.top() + 1);
+		while_loop_val = label_stack.top() + 1;
+	     	inst_vector.push_back(temp);
+	     	assembly.push_back(inst_vector);
+
+} '(' cond ')' decl aug_stmt_list ENDWHILE {
+	vector<string> inst_vector;
+	string temp1 = "jmp label" + to_string(label_stack.top() + 1);
+	string temp2 = "label label" + to_string(label_stack.top());
+     	inst_vector.push_back(temp1);
+	inst_vector.push_back(temp2);
+     	assembly.push_back(inst_vector);
+
+     	current_scope = table[current_scope].parent_scopes[1];
+
+     	label_stack.pop();
+}
+;
+aug_stmt_list: aug_stmt aug_stmt_list
+		|
+;
+aug_stmt: base_stmt
+	| aug_if_stmt
+	| while_stmt
+	| CONTINUE';' {
+		vector<string> inst_vector;
+		string temp = "jmp label" + to_string(while_loop_val);
+		inst_vector.push_back(temp);
+     		assembly.push_back(inst_vector);
+	}
+	| BREAK';' {
+		//int x = label_stack.pop();
+		vector<string> inst_vector;
+		string temp = "jmp label" + to_string(while_loop_val - 1);
+		inst_vector.push_back(temp);
+     		assembly.push_back(inst_vector);
+     		//label_stack.push(x);
+
+	}
+;
+aug_if_stmt: IF
+{
+	func_scope++;
+	scopes.push_back("BLOCK");
+	struct Sym_table temp_table;
+	table.push_back(temp_table);
+	// _______________________________
+		table[func_scope].parent_scopes.push_back(func_scope);
+		for(int i = 0; i<(table[current_scope].parent_scopes).size();i++){
+			table[func_scope].parent_scopes.push_back(table[current_scope].parent_scopes[i]);
+		}
+		current_scope = func_scope;
+		//_________________________________
+
+
+	label_val = label_val + 2;
+	label_stack.push(label_val - 1);
+}
+'(' cond ')' decl aug_stmt_list
+{
+	vector<string> inst_vector;
+	string jump_label = to_string(label_stack.top() + 1);
+	string temp1 = "jmp label" + jump_label;
+	// For the beginning of else label
+	string else_label = to_string(label_stack.top());
+	string temp2 = "label label" + else_label;
+	inst_vector.push_back(temp1);
+	inst_vector.push_back(temp2);
+	assembly.push_back(inst_vector);
+	current_scope = table[current_scope].parent_scopes[1];
+} aug_else_part ENDIF {
+	vector<string> inst_vector;
+	string end_label = to_string(label_stack.top() + 1);
+	string temp = "label label" + end_label;
+	inst_vector.push_back(temp);
+	assembly.push_back(inst_vector);
+	label_stack.pop();
+}
+;
+aug_else_part: ELSE {
+	func_scope++;
+		scopes.push_back("BLOCK");
+		struct Sym_table temp_table;
+		table.push_back(temp_table);
+		// _______________________________
+		table[func_scope].parent_scopes.push_back(func_scope);
+		for(int i = 0; i<(table[current_scope].parent_scopes).size();i++){
+			table[func_scope].parent_scopes.push_back(table[current_scope].parent_scopes[i]);
+		}
+		current_scope = func_scope;
+		//_________________________________
+} decl aug_stmt_list {
+	current_scope = table[current_scope].parent_scopes[1];
+}
+		|
+;
+
+
+%%
